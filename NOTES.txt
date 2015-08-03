@@ -1,0 +1,11 @@
+
+
+Open questions:
+  - What is the right way to join a subject? (just the id or use the filename)
+  - 
+ 
+Tom's TODO list:
+  - test app works with new workflow items
+  - use workflow version as an input
+  - expert vs non-expert
+  - put code on github
