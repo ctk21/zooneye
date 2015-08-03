@@ -216,7 +216,7 @@ class AccumulateCupDiskBoundaryBox(DataFrameAccumulator):
             }
             rdict['cdr_vertical'] = rdict['cup_height']/rdict['disk_height']
             rdict['cdr_horizontal'] = rdict['cup_width']/rdict['disk_width']
-            rdict['cdr_area'] = rdict['cup_area']/rdict['disk_area']
+            rdict['cdr_area'] = math.sqrt(rdict['cup_area']/rdict['disk_area'])
             rdict['nerve_cd_area'] = rdict['disk_area'] - rdict['cup_area']
             push_keys_and_dict_onto_list(rkey, skey, rdict, self.row_list)
             
