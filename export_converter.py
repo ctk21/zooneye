@@ -34,6 +34,9 @@ def row_skey(row):
     sub_key = next(iter(sub_dat.keys()))
     return {'subject_id': sub_key, 'subject_filename': sub_dat[sub_key]['filename']}
 
+def poly_area(x,y):
+    return 0.5*np.abs(np.dot(x,np.roll(y,1))-np.dot(y,np.roll(x,1)))
+
 def nan2value(x, v):
     return x if not math.isnan(x) else v
 
@@ -63,6 +66,16 @@ class BaseAccumulator(object):
     def setup(self, df): pass        
     def handle_row(self, rkey, skey, row): pass
     def finish(self, df): pass
+
+class DataFrameAccumulator(BaseAccumulator):
+    def __init__(self):
+        self.row_list = []
+        self.stat_df = None
+
+    def dataframe(self):
+        if self.stat_df is None:
+            self.stat_df = df_xcols(pd.DataFrame(self.row_list), CSV_KEY_ORDER)
+        return self.stat_df
     
     
 class AccumulateWorkflows(BaseAccumulator):
@@ -92,12 +105,10 @@ class AccumulateTasks(BaseAccumulator):
             print("%s: %i"%(k,v))
 
 
-class AccumulateOpticNerveBox(BaseAccumulator):
+class AccumulateOpticNerveBox(DataFrameAccumulator):
     def __init__(self, out_file=None):
+        super(AccumulateOpticNerveBox, self).__init__()
         self.out_file = out_file
-    
-    def setup(self, df):
-        self.row_list = []
         
     def handle_row(self, rkey, skey, row):
         workflow_id = row['workflow_id']
@@ -105,48 +116,46 @@ class AccumulateOpticNerveBox(BaseAccumulator):
         for x in annotations:
             if is_task_key(TASK_KEY_DISK_BOX, workflow_id, x):
                 dat = x['value'][0]
-                rdict = {'height': dat['height'],
-                         'width': dat['width'],
-                         'x': dat['x'],
-                         'y': dat['y'],}
+                rdict = {'nerve_box_height': dat['height'],
+                         'nerve_box_width': dat['width'],
+                         'nerve_box_x': dat['x'],
+                         'nerve_box_y': dat['y'],}
                 push_keys_and_dict_onto_list(rkey, skey, rdict, self.row_list)
-
+                
     def finish(self, df):        
-        stat_df = df_xcols(pd.DataFrame(self.row_list), CSV_KEY_ORDER)
+        stat_df = self.dataframe()
         grouped = stat_df.groupby(['subject_id'], as_index=False)
-        tmp = pd.merge(grouped['x'].agg({'n': len}),
-                       grouped[['x', 'y', 'width', 'height']].agg(np.mean))
+        tmp = pd.merge(grouped['nerve_box_x'].agg({'n': len}),
+                       grouped[['nerve_box_x', 'nerve_box_y', 'nerve_box_width', 'nerve_box_height']].agg(np.mean))
         print('Optic Nerve Box statistics: ')
         print(tmp)
         print('Count Optic Nerve Box rows: %i'%len(stat_df))
-        print('Mean Optic Nerve Box height/width: %.4f'%np.mean(stat_df['height'].values/stat_df['width'].values))
+        print('Mean Optic Nerve Box height/width: %.4f'%np.mean(stat_df['nerve_box_height'].values/stat_df['nerve_box_width'].values))
 
         if self.out_file:
             stat_df.to_csv(self.out_file, index=False)
         
             
-class AccumulateFoveaMarks(BaseAccumulator):
+class AccumulateFoveaMarks(DataFrameAccumulator):
     def __init__(self, out_file=None):
+        super(AccumulateFoveaMarks, self).__init__()
         self.out_file = out_file
-    
-    def setup(self, df):
-        self.row_list = []
-     
+        
     def handle_row(self, rkey, skey, row):
         workflow_id = row['workflow_id']
         annotations = parse_field(row['annotations'])
         for x in annotations:
             if is_task_key(TASK_KEY_MARK_FOVEA, workflow_id, x):
                 dat = x['value'][0]
-                rdict = {'x': dat['x'],
-                         'y': dat['y'],}
+                rdict = {'fovea_x': dat['x'],
+                         'fovea_y': dat['y'],}
                 push_keys_and_dict_onto_list(rkey, skey, rdict, self.row_list)
-
+                
     def finish(self, df):        
-        stat_df = df_xcols(pd.DataFrame(self.row_list), CSV_KEY_ORDER)
+        stat_df = self.dataframe()
         grouped = stat_df.groupby(['subject_id'], as_index=False)
-        tmp = pd.merge(grouped['x'].agg({'n': len}),
-                       grouped[['x', 'y']].agg(np.mean))
+        tmp = pd.merge(grouped['fovea_x'].agg({'n': len}),
+                       grouped[['fovea_x', 'fovea_y']].agg(np.mean))
         print('Fovea mark statistics: ')
         print(tmp)
 
@@ -154,13 +163,11 @@ class AccumulateFoveaMarks(BaseAccumulator):
             stat_df.to_csv(self.out_file, index=False)
                 
 
-class AccumulateCupDiskBoundaryBox(BaseAccumulator):
+class AccumulateCupDiskBoundaryBox(DataFrameAccumulator):
     def __init__(self, out_file=None):
+        super(AccumulateCupDiskBoundaryBox, self).__init__()
         self.out_file = out_file
         
-    def setup(self, df):
-        self.row_list = []
-
     def handle_row(self, rkey, skey, row):
         workflow_id = row['workflow_id']
         annotations = parse_field(row['annotations'])
@@ -175,6 +182,7 @@ class AccumulateCupDiskBoundaryBox(BaseAccumulator):
                     assert(dat['tool'] == 0)
                     points = parse_point_array(dat['points'])
 
+                    disk_area = poly_area(points[:,1], points[:,0])
                     disk_min = np.min(points, axis=0)
                     disk_max = np.max(points, axis=0)                    
                     valid_disk = True
@@ -188,6 +196,7 @@ class AccumulateCupDiskBoundaryBox(BaseAccumulator):
                     assert(dat['tool'] == 0)
                     points = parse_point_array(dat['points'])
 
+                    cup_area = poly_area(points[:,1], points[:,0])
                     cup_min = np.min(points, axis=0)
                     cup_max = np.max(points, axis=0)
                     valid_cup = True
@@ -198,20 +207,23 @@ class AccumulateCupDiskBoundaryBox(BaseAccumulator):
                 'disk_y': disk_min[1],
                 'disk_width': disk_max[0] - disk_min[0],
                 'disk_height': disk_max[1] - disk_min[1],
+                'disk_area': disk_area,
                 'cup_x': cup_min[0],
                 'cup_y': cup_min[1],
                 'cup_width': cup_max[0] - cup_min[0],
-                'cup_height': cup_max[1] - cup_min[1],            
+                'cup_height': cup_max[1] - cup_min[1],
+                'cup_area': cup_area,
             }
-            rdict['vertical_cdr'] = rdict['cup_height']/rdict['disk_height']
-            rdict['horizontal_cdr'] = rdict['cup_width']/rdict['disk_width']
+            rdict['cdr_vertical'] = rdict['cup_height']/rdict['disk_height']
+            rdict['cdr_horizontal'] = rdict['cup_width']/rdict['disk_width']
+            rdict['cdr_area'] = rdict['cup_area']/rdict['disk_area']
             push_keys_and_dict_onto_list(rkey, skey, rdict, self.row_list)
-        
+            
     def finish(self, df):
-        stat_df = df_xcols(pd.DataFrame(self.row_list), CSV_KEY_ORDER)
+        stat_df = self.dataframe()
         grouped = stat_df.groupby(['subject_id'], as_index=False)
         tmp = pd.merge(grouped['disk_x'].agg({'n': len}),
-                       grouped[['vertical_cdr', 'horizontal_cdr']].agg(np.mean))
+                       grouped[['cdr_vertical', 'cdr_horizontal', 'cdr_area']].agg(np.mean))
 
         print('CupDiskBoundaryBox statistics: ')
         print(tmp)
@@ -220,13 +232,11 @@ class AccumulateCupDiskBoundaryBox(BaseAccumulator):
             stat_df.to_csv(self.out_file, index=False)
         
    
-class AccumulateNotchHaemorrhageMarks(BaseAccumulator):
+class AccumulateNotchHaemorrhageMarks(DataFrameAccumulator):    
     def __init__(self, out_file=None):
+        super(AccumulateNotchHaemorrhageMarks, self).__init__()
         self.out_file = out_file
     
-    def setup(self, df):
-        self.row_list = []
-     
     def handle_row(self, rkey, skey, row):
         workflow_id = row['workflow_id']
         annotations = parse_field(row['annotations'])
@@ -235,21 +245,31 @@ class AccumulateNotchHaemorrhageMarks(BaseAccumulator):
                 for mark in x['value']:
                     rdict = { 'mark_id': mark['tool'],
                               'mark_label': mark['tool_label'],
-                              'x': mark['x'],
-                              'y': mark['y'], }
+                              'mark_x': mark['x'],
+                              'mark_y': mark['y'], }
                     push_keys_and_dict_onto_list(rkey, skey, rdict, self.row_list)    
 
                 if len(x['value']) == 0:
                     rdict = { 'mark_id': -1, 
                               'mark_label': 'No_Notch_Or_Haemorrhage',
-                              'x': -1,
-                              'y': -1, }
+                              'mark_x': -1,
+                              'mark_y': -1, }
                     push_keys_and_dict_onto_list(rkey, skey, rdict, self.row_list)    
-                    
+
+    def dataframe(self):
+        NOTCH_ID = 0
+        HAEMORRHAGE_ID = 1
+        df = super(AccumulateNotchHaemorrhageMarks, self).dataframe()
+        grouped = df.groupby(CSV_KEY_ORDER, as_index=False)
+        return grouped['mark_id'].agg({
+            'n_notch': lambda xs: np.sum(xs == NOTCH_ID),
+            'n_heamorrhage': lambda xs: np.sum(xs == HAEMORRHAGE_ID),
+        }) 
+        
     def finish(self, df):        
-        stat_df = df_xcols(pd.DataFrame(self.row_list), CSV_KEY_ORDER)
+        stat_df = super(AccumulateNotchHaemorrhageMarks, self).dataframe()
         grouped = stat_df.groupby(['subject_id', 'mark_id', 'mark_label'], as_index=False)
-        tmp = grouped['x'].agg({'n': len})
+        tmp = grouped['mark_x'].agg({'n': len})
         print('Notch/Haemorrhage mark statistics: ')
         print(tmp)
 
@@ -287,12 +307,19 @@ def main(args):
         min_id = df['workflow_id'].replace(VALID_WORKFLOWS)
         df = df.loc[df['workflow_version'] >= min_id]
 
-        fn = lambda x: os.path.join(args.outpath, x)
-        accumulators = [
-            AccumulateFoveaMarks(fn('fovea_data.csv')), 
-            AccumulateOpticNerveBox(fn('optic_nerve_box_data.csv')),
-            AccumulateCupDiskBoundaryBox(fn('cup_disk_data.csv')),
-            AccumulateNotchHaemorrhageMarks(fn('notch_haemorrhage_marks.csv')),
+        outdir_fn = lambda x: os.path.join(args.outpath, x)
+        accum_fovea = AccumulateFoveaMarks(outdir_fn('fovea_data.csv'))
+        accum_optic_box = AccumulateOpticNerveBox(outdir_fn('optic_nerve_box_data.csv'))
+        accum_cup_disk = AccumulateCupDiskBoundaryBox(outdir_fn('cup_disk_data.csv'))
+        accum_notch_haem = AccumulateNotchHaemorrhageMarks(outdir_fn('notch_haemorrhage_marks.csv'))
+        df_accumulators = [
+            accum_fovea,
+            accum_optic_box,
+            accum_cup_disk,
+            accum_notch_haem,
+        ]
+        
+        accumulators = df_accumulators + [
             AccumulateTasks(),
             AccumulateWorkflows(),
             ##PrintSubjectInfo(),
@@ -308,21 +335,27 @@ def main(args):
             rkey = row_ukey(row)
             skey = row_skey(row)
             if args.verbose: print(' Processing row: %s|%s'%(str(rkey), str(skey)))
-            
-            #print(yaml.dump(parse_field(row['annotations'])))
+            if args.dump_annotations: print(yaml.dump(parse_field(row['annotations'])))
             for a in accumulators:
                 a.handle_row(rkey, skey, row)
                 
         for a in accumulators:
             a.finish(df)
 
-
+        ## create single dataframe
+        merged_df = df_accumulators[0].dataframe()
+        for dfa in df_accumulators[1:]:
+            merged_df = pd.merge(merged_df, dfa.dataframe(), how='outer')
+        merged_df = df_xcols(merged_df, CSV_KEY_ORDER)
+        merged_df.to_csv(outdir_fn('all_data.csv'), index=False)
+        
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Tool to read Zooniverse input and convert to objects')    
     parser.add_argument('file', nargs='+', help='files to process')
     parser.add_argument('-o', '--outpath', help='output path', default='')
     parser.add_argument('-v', '--verbose', help='verbose output', default=False, action='store_true')
-
+    parser.add_argument('--dump_annotations', help='dump every parsed annotation field', default=False, action='store_true')
+    
     args = parser.parse_args()
 
     if args.verbose:
