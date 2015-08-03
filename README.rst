@@ -18,18 +18,18 @@ installed.)
 
 
 This will produce the following file outputs for each of the tasks:
- - fovea_data.csv
- - optic_nerve_box_data.csv
- - cup_disk_data.csv 
- - notch_haemorrhage_marks.csv
+ * fovea_data.csv
+ * optic_nerve_box_data.csv
+ * cup_disk_data.csv 
+ * notch_haemorrhage_marks.csv
  
 The program works (see main function) in the following steps:
- - Load the Zooniverse CSV export data with Pandas
- - Filter to the required workflows as specified in VALID_WORKFLOWS.
- - Setup 'accumulators' to process the data. Each accumulator is
+ * Load the Zooniverse CSV export data with Pandas
+ * Filter to the required workflows as specified in VALID_WORKFLOWS.
+ * Setup 'accumulators' to process the data. Each accumulator is
    called to setup (using the whole dataframe), on each row with a
    user and subject key and to finish.
- - The accumulators typically reach into the dataframe and parse the
+ * The accumulators typically reach into the dataframe and parse the
    embedded annotation row in the handle_row() call. See for example
    AccumulateOpticNerveBox.handle_row().
 
