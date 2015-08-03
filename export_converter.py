@@ -14,8 +14,8 @@ VALID_WORKFLOWS = {
 
 TASK_KEY_DISK_BOX       = (162, 'T1')
 TASK_KEY_MARK_FOVEA     = (162, 'T3') 
-TASK_KEY_DISK_BOUNDARY  = (162, 'T4')
-TASK_KEY_CUP_BOUNDARY   = (162, 'T5')
+TASK_KEY_CUP_BOUNDARY   = (162, 'T4')
+TASK_KEY_DISK_BOUNDARY  = (162, 'T5')
 TASK_KEY_MARK_NOTCH_HAEMORRHAGE = (162, 'T6') 
 
 CSV_KEY_ORDER = ['created_at', 'user_name', 'expert', 'subject_id', 'subject_filename']
@@ -172,7 +172,7 @@ class AccumulateCupDiskBoundaryBox(BaseAccumulator):
                     print('WARNING: skipping disk boundary as no points field: %s'%str(x))
                 else:
                     dat = dat[0]
-                    assert(dat['tool'] == 0 and dat['tool_label'] == 'Nerve')
+                    assert(dat['tool'] == 0)
                     points = parse_point_array(dat['points'])
 
                     disk_min = np.min(points, axis=0)
@@ -185,7 +185,7 @@ class AccumulateCupDiskBoundaryBox(BaseAccumulator):
                     print('WARNING: skipping cup boundary as no points field: %s'%str(x))
                 else:                    
                     dat = dat[0]
-                    assert(dat['tool'] == 0 and dat['tool_label'] == 'Cup')
+                    assert(dat['tool'] == 0)
                     points = parse_point_array(dat['points'])
 
                     cup_min = np.min(points, axis=0)
