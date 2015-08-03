@@ -1,7 +1,8 @@
 
-
 import argparse
+import math
 import numpy as np
+import os
 import pandas as pd
 import sys
 import yaml
@@ -15,33 +16,26 @@ TASK_KEY_DISK_BOX       = (162, 'T1')
 TASK_KEY_MARK_FOVEA     = (162, 'T3') 
 TASK_KEY_DISK_BOUNDARY  = (162, 'T4')
 TASK_KEY_CUP_BOUNDARY   = (162, 'T5')
-TASK_KEY_MARK_NOTCH_HEMORAGE = (162, 'T6') 
+TASK_KEY_MARK_NOTCH_HAEMORRHAGE = (162, 'T6') 
 
-CSV_KEY_ORDER = ['created_at', 'user_name', 'subject_id', 'subject_filename']
+CSV_KEY_ORDER = ['created_at', 'user_name', 'expert', 'subject_id', 'subject_filename']
 
 def df_xcols(df, cols):
     xs = np.concatenate((cols, df.columns.values))
     _, idx = np.unique(xs, return_index=True)
-    print(np.sort(idx))
     return df[xs[np.sort(idx)]]
-    
-def open_output(args):
-    if args.verbose:
-        print('Output to: ' + (args.outfile if args.outfile else '<stdout>' ))
-    if args.outfile:
-        return open(args.outfile, 'w')
-    else:
-        return sys.stdout
 
 def row_ukey(row):
-    return {'user_name': row['user_name'], 'created_at': row['created_at']}
+    return {'user_name': row['user_name'], 'created_at': row['created_at'], 'expert': nan2value(row['expert'], 0)}
 
 def row_skey(row):
     ## NB: assumes only one subject per classification
     sub_dat = parse_field(row['subject_data'])
-    print(sub_dat)
     sub_key = next(iter(sub_dat.keys()))
     return {'subject_id': sub_key, 'subject_filename': sub_dat[sub_key]['filename']}
+
+def nan2value(x, v):
+    return x if not math.isnan(x) else v
 
 def parse_field(field):
     return yaml.safe_load(field) if type(field) is str else field
@@ -49,15 +43,22 @@ def parse_field(field):
 def parse_point_array(point_list):
     return pd.DataFrame(point_list).values
 
-def is_task_key(task_key, workflow_id, annotation_row):
+def is_task_key(task_key, workflow_id, annotation_row, skip_empty_value=True):
     if workflow_id != task_key[0]:
         return False
     if ('task' in annotation_row) and ('task_label' in annotation_row):
-        return annotation_row['task'] == task_key[1]
+        return annotation_row['task'] == task_key[1] and \
+               ((not skip_empty_value) or len(annotation_row['value']) > 0)
     else:
-        print('No task, task_label in annotation: %s'%str(annotation_row))
+        print('No task, task_label with value in annotation: %s'%str(annotation_row))
         return False
-    
+
+def push_keys_and_dict_onto_list(ukey, skey, rdict, the_list):
+    rdict.update(ukey)
+    rdict.update(skey)
+    the_list.append(rdict)
+    return the_list
+
 class BaseAccumulator(object):
     def setup(self, df): pass        
     def handle_row(self, rkey, skey, row): pass
@@ -90,7 +91,8 @@ class AccumulateTasks(BaseAccumulator):
         for k, v in iter(self.task_dict.items()):
             print("%s: %i"%(k,v))
 
-class AccumulateT1Box(BaseAccumulator):
+
+class AccumulateOpticNerveBox(BaseAccumulator):
     def __init__(self, out_file=None):
         self.out_file = out_file
     
@@ -101,30 +103,56 @@ class AccumulateT1Box(BaseAccumulator):
         workflow_id = row['workflow_id']
         annotations = parse_field(row['annotations'])
         for x in annotations:
-            if is_task_key(TASK_KEY_DISK_BOX, workflow_id, x) and len(x['value']) > 0:
+            if is_task_key(TASK_KEY_DISK_BOX, workflow_id, x):
                 dat = x['value'][0]
                 rdict = {'height': dat['height'],
                          'width': dat['width'],
                          'x': dat['x'],
-                         'y': dat['y']                 
-                     }
-                rdict.update(rkey)
-                rdict.update(skey)
-                self.row_list.append(rdict)                
+                         'y': dat['y'],}
+                push_keys_and_dict_onto_list(rkey, skey, rdict, self.row_list)
 
     def finish(self, df):        
         stat_df = df_xcols(pd.DataFrame(self.row_list), CSV_KEY_ORDER)
         grouped = stat_df.groupby(['subject_id'], as_index=False)
         tmp = pd.merge(grouped['x'].agg({'n': len}),
                        grouped[['x', 'y', 'width', 'height']].agg(np.mean))
-        print('T1Box box statistics: ')
+        print('Optic Nerve Box statistics: ')
         print(tmp)
-        print('Count T1Box rows: %i'%len(stat_df))
-        print('Mean T1Box height/width: %.4f'%np.mean(stat_df['height'].values/stat_df['width'].values))
+        print('Count Optic Nerve Box rows: %i'%len(stat_df))
+        print('Mean Optic Nerve Box height/width: %.4f'%np.mean(stat_df['height'].values/stat_df['width'].values))
 
         if self.out_file:
             stat_df.to_csv(self.out_file, index=False)
         
+            
+class AccumulateFoveaMarks(BaseAccumulator):
+    def __init__(self, out_file=None):
+        self.out_file = out_file
+    
+    def setup(self, df):
+        self.row_list = []
+     
+    def handle_row(self, rkey, skey, row):
+        workflow_id = row['workflow_id']
+        annotations = parse_field(row['annotations'])
+        for x in annotations:
+            if is_task_key(TASK_KEY_MARK_FOVEA, workflow_id, x):
+                dat = x['value'][0]
+                rdict = {'x': dat['x'],
+                         'y': dat['y'],}
+                push_keys_and_dict_onto_list(rkey, skey, rdict, self.row_list)
+
+    def finish(self, df):        
+        stat_df = df_xcols(pd.DataFrame(self.row_list), CSV_KEY_ORDER)
+        grouped = stat_df.groupby(['subject_id'], as_index=False)
+        tmp = pd.merge(grouped['x'].agg({'n': len}),
+                       grouped[['x', 'y']].agg(np.mean))
+        print('Fovea mark statistics: ')
+        print(tmp)
+
+        if self.out_file:
+            stat_df.to_csv(self.out_file, index=False)
+                
 
 class AccumulateCupDiskBoundaryBox(BaseAccumulator):
     def __init__(self, out_file=None):
@@ -140,12 +168,8 @@ class AccumulateCupDiskBoundaryBox(BaseAccumulator):
         for x in annotations:
             if is_task_key(TASK_KEY_DISK_BOUNDARY, workflow_id, x):
                 dat = x['value']
-                if len(dat) == 0:
-                    print('WARNING: skipping disk boundary as no value data: %s'%str(x))
-                elif not 'points' in dat[0]:
+                if not 'points' in dat[0]:
                     print('WARNING: skipping disk boundary as no points field: %s'%str(x))
-                elif not dat[0]['closed']:
-                    print('WARNING: skipping disk boundary as not closed: %s'%str(x))
                 else:
                     dat = dat[0]
                     assert(dat['tool'] == 0 and dat['tool_label'] == 'Nerve')
@@ -157,12 +181,8 @@ class AccumulateCupDiskBoundaryBox(BaseAccumulator):
 
             if is_task_key(TASK_KEY_CUP_BOUNDARY, workflow_id, x):
                 dat = x['value']
-                if len(dat) == 0:
-                    print('WARNING: skipping cup boundary as no value data: %s'%str(x))
-                elif not 'points' in dat[0]:
+                if not 'points' in dat[0]:
                     print('WARNING: skipping cup boundary as no points field: %s'%str(x))
-                elif not dat[0]['closed']:
-                    print('WARNING: skipping cup boundary as not closed: %s'%str(x))
                 else:                    
                     dat = dat[0]
                     assert(dat['tool'] == 0 and dat['tool_label'] == 'Cup')
@@ -185,9 +205,7 @@ class AccumulateCupDiskBoundaryBox(BaseAccumulator):
             }
             rdict['vertical_cdr'] = rdict['cup_height']/rdict['disk_height']
             rdict['horizontal_cdr'] = rdict['cup_width']/rdict['disk_width']
-            rdict.update(rkey)
-            rdict.update(skey)
-            self.row_list.append(rdict)        
+            push_keys_and_dict_onto_list(rkey, skey, rdict, self.row_list)
         
     def finish(self, df):
         stat_df = df_xcols(pd.DataFrame(self.row_list), CSV_KEY_ORDER)
@@ -201,7 +219,44 @@ class AccumulateCupDiskBoundaryBox(BaseAccumulator):
         if self.out_file:
             stat_df.to_csv(self.out_file, index=False)
         
+   
+class AccumulateNotchHaemorrhageMarks(BaseAccumulator):
+    def __init__(self, out_file=None):
+        self.out_file = out_file
+    
+    def setup(self, df):
+        self.row_list = []
+     
+    def handle_row(self, rkey, skey, row):
+        workflow_id = row['workflow_id']
+        annotations = parse_field(row['annotations'])
+        for x in annotations:
+            if is_task_key(TASK_KEY_MARK_NOTCH_HAEMORRHAGE, workflow_id, x, skip_empty_value=False):
+                for mark in x['value']:
+                    rdict = { 'mark_id': mark['tool'],
+                              'mark_label': mark['tool_label'],
+                              'x': mark['x'],
+                              'y': mark['y'], }
+                    push_keys_and_dict_onto_list(rkey, skey, rdict, self.row_list)    
+
+                if len(x['value']) == 0:
+                    rdict = { 'mark_id': -1, 
+                              'mark_label': 'No_Notch_Or_Haemorrhage',
+                              'x': -1,
+                              'y': -1, }
+                    push_keys_and_dict_onto_list(rkey, skey, rdict, self.row_list)    
                     
+    def finish(self, df):        
+        stat_df = df_xcols(pd.DataFrame(self.row_list), CSV_KEY_ORDER)
+        grouped = stat_df.groupby(['subject_id', 'mark_id', 'mark_label'], as_index=False)
+        tmp = grouped['x'].agg({'n': len})
+        print('Notch/Haemorrhage mark statistics: ')
+        print(tmp)
+
+        if self.out_file:
+            stat_df.to_csv(self.out_file, index=False)
+
+            
 class PrintSubjectInfo(BaseAccumulator):
     def handle_row(self, rkey, skey, row):
         subject = parse_field(row['subject_data'])
@@ -221,47 +276,51 @@ class PrintRowsForTaskKey(BaseAccumulator):
                 
                 
 def main(args):
-    with open_output(args) as outf:
-        for fnme in args.file:
-            if args.verbose: print('Processing: '+fnme)
+    for fnme in args.file:
+        if args.verbose: print('Processing: '+fnme)
+        
+        df = pd.read_csv(fnme)   
+        if args.verbose: df.info()
 
-            df = pd.read_csv(fnme)   
-            if args.verbose: df.info()
+        ## filter to valid workflows
+        df = df.loc[df['workflow_id'].isin(VALID_WORKFLOWS.keys())]
+        min_id = df['workflow_id'].replace(VALID_WORKFLOWS)
+        df = df.loc[df['workflow_version'] >= min_id]
 
-            ## filter to valid workflows
-            df = df.loc[df['workflow_id'].isin(VALID_WORKFLOWS.keys())]
-            min_id = df['workflow_id'].replace(VALID_WORKFLOWS)
-            df = df.loc[df['workflow_version'] >= min_id]
+        fn = lambda x: os.path.join(args.outpath, x)
+        accumulators = [
+            AccumulateFoveaMarks(fn('fovea_data.csv')), 
+            AccumulateOpticNerveBox(fn('optic_nerve_box_data.csv')),
+            AccumulateCupDiskBoundaryBox(fn('cup_disk_data.csv')),
+            AccumulateNotchHaemorrhageMarks(fn('notch_haemorrhage_marks.csv')),
+            AccumulateTasks(),
+            AccumulateWorkflows(),
+            ##PrintSubjectInfo(),
+            ##PrintRowsForTaskKey(TASK_KEY_MARK_FOVEA),
+            ##PrintRowsForTaskKey(TASK_KEY_DISK_BOUNDARY),
+            ##PrintRowsForTaskKey(TASK_KEY_CUP_BOUNDARY),
+            ##PrintRowsForTaskKey(TASK_KEY_MARK_NOTCH_HAEMORRHAGE),
+        ]
+        for a in accumulators:
+            a.setup(df)
+
+        for idx, row in df.iterrows():
+            rkey = row_ukey(row)
+            skey = row_skey(row)
+            if args.verbose: print(' Processing row: %s|%s'%(str(rkey), str(skey)))
             
-            accumulators = [
-                ##AccumulateCupDiskBoundaryBox('cup_disk_data.csv'),
-                ##AccumulateT1Box('t1_box_data.csv'),
-                AccumulateTasks(),
-                AccumulateWorkflows(),
-                ##PrintSubjectInfo(),
-                PrintRowsForTaskKey(TASK_KEY_DISK_BOUNDARY),
-                PrintRowsForTaskKey(TASK_KEY_CUP_BOUNDARY),
-            ]
+            #print(yaml.dump(parse_field(row['annotations'])))
             for a in accumulators:
-                a.setup(df)
-
-            for idx, row in df.iterrows():
-                rkey = row_ukey(row)
-                skey = row_skey(row)
-                if args.verbose: print(' Processing row: %s|%s'%(str(rkey), str(skey)))
-                    
-                #print(yaml.dump(parse_field(row['annotations'])))
-                for a in accumulators:
-                    a.handle_row(rkey, skey, row)
-                        
-            for a in accumulators:
-                a.finish(df)
+                a.handle_row(rkey, skey, row)
+                
+        for a in accumulators:
+            a.finish(df)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Tool to read Zooniverse input and convert to objects')    
     parser.add_argument('file', nargs='+', help='files to process')
-    parser.add_argument('-o', '--outfile', help='output file (stdout if not present)', default=None)
+    parser.add_argument('-o', '--outpath', help='output path', default='')
     parser.add_argument('-v', '--verbose', help='verbose output', default=False, action='store_true')
 
     args = parser.parse_args()
@@ -271,6 +330,3 @@ if __name__ == '__main__':
 
     main(args)
     
-
-## TODO: abstract the parsing? how to make things reusable?
-## TODO: how to configure the pipeline?
