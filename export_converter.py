@@ -217,13 +217,14 @@ class AccumulateCupDiskBoundaryBox(DataFrameAccumulator):
             rdict['cdr_vertical'] = rdict['cup_height']/rdict['disk_height']
             rdict['cdr_horizontal'] = rdict['cup_width']/rdict['disk_width']
             rdict['cdr_area'] = rdict['cup_area']/rdict['disk_area']
+            rdict['nerve_cd_area'] = rdict['disk_area'] - rdict['cup_area']
             push_keys_and_dict_onto_list(rkey, skey, rdict, self.row_list)
             
     def finish(self, df):
         stat_df = self.dataframe()
         grouped = stat_df.groupby(['subject_id'], as_index=False)
         tmp = pd.merge(grouped['disk_x'].agg({'n': len}),
-                       grouped[['cdr_vertical', 'cdr_horizontal', 'cdr_area']].agg(np.mean))
+                       grouped[['cdr_vertical', 'cdr_horizontal', 'cdr_area', 'nerve_cd_area']].agg(np.mean))
 
         print('CupDiskBoundaryBox statistics: ')
         print(tmp)
