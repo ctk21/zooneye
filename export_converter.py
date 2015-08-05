@@ -34,12 +34,6 @@ def row_skey(row):
     sub_key = next(iter(sub_dat.keys()))
     return {'subject_id': sub_key, 'subject_filename': sub_dat[sub_key]['filename']}
 
-def poly_area(x,y):
-    return 0.5*np.abs(np.dot(x,np.roll(y,1))-np.dot(y,np.roll(x,1)))
-
-def nan2value(x, v):
-    return x if not math.isnan(x) else v
-
 def parse_field(field):
     return yaml.safe_load(field) if type(field) is str else field
 
@@ -61,6 +55,15 @@ def push_keys_and_dict_onto_list(ukey, skey, rdict, the_list):
     rdict.update(skey)
     the_list.append(rdict)
     return the_list
+
+def poly_area(x,y):
+    return 0.5*np.abs(np.dot(x,np.roll(y,1))-np.dot(y,np.roll(x,1)))
+
+def nan2value(x, v):
+    return x if not math.isnan(x) else v
+
+def calc_f2d_mu_scale(df):
+    return 4500./np.sqrt((df['fovea_center_x'].values - df['disk_center_x'].values)**2 + (df['fovea_center_y'].values - df['disk_center_y'].values)**2)
 
 class BaseAccumulator(object):
     def setup(self, df): pass        
@@ -118,15 +121,15 @@ class AccumulateOpticNerveBox(DataFrameAccumulator):
                 dat = x['value'][0]
                 rdict = {'nerve_box_height': dat['height'],
                          'nerve_box_width': dat['width'],
-                         'nerve_box_x': dat['x'],
-                         'nerve_box_y': dat['y'],}
+                         'nerve_box_center_x': dat['x']+0.5*dat['width'],
+                         'nerve_box_center_y': dat['y']+0.5*dat['height'],}
                 push_keys_and_dict_onto_list(rkey, skey, rdict, self.row_list)
                 
     def finish(self, df):        
         stat_df = self.dataframe()
         grouped = stat_df.groupby(['subject_id'], as_index=False)
-        tmp = pd.merge(grouped['nerve_box_x'].agg({'n': len}),
-                       grouped[['nerve_box_x', 'nerve_box_y', 'nerve_box_width', 'nerve_box_height']].agg(np.mean))
+        tmp = pd.merge(grouped['nerve_box_center_x'].agg({'n': len}),
+                       grouped[['nerve_box_center_x', 'nerve_box_center_y', 'nerve_box_width', 'nerve_box_height']].agg(np.mean))
         print('Optic Nerve Box statistics: ')
         print(tmp)
         print('Count Optic Nerve Box rows: %i'%len(stat_df))
@@ -147,15 +150,15 @@ class AccumulateFoveaMarks(DataFrameAccumulator):
         for x in annotations:
             if is_task_key(TASK_KEY_MARK_FOVEA, workflow_id, x):
                 dat = x['value'][0]
-                rdict = {'fovea_x': dat['x'],
-                         'fovea_y': dat['y'],}
+                rdict = {'fovea_center_x': dat['x'],
+                         'fovea_center_y': dat['y'],}
                 push_keys_and_dict_onto_list(rkey, skey, rdict, self.row_list)
                 
     def finish(self, df):        
         stat_df = self.dataframe()
         grouped = stat_df.groupby(['subject_id'], as_index=False)
-        tmp = pd.merge(grouped['fovea_x'].agg({'n': len}),
-                       grouped[['fovea_x', 'fovea_y']].agg(np.mean))
+        tmp = pd.merge(grouped['fovea_center_x'].agg({'n': len}),
+                       grouped[['fovea_center_x', 'fovea_center_y']].agg(np.mean))
         print('Fovea mark statistics: ')
         print(tmp)
 
@@ -203,13 +206,13 @@ class AccumulateCupDiskBoundaryBox(DataFrameAccumulator):
         
         if valid_cup and valid_disk:
             rdict = {
-                'disk_x': disk_min[0],
-                'disk_y': disk_min[1],
+                'disk_center_x': 0.5*(disk_min[0]+disk_max[0]),
+                'disk_center_y': 0.5*(disk_min[1]+disk_max[1]),
                 'disk_width': disk_max[0] - disk_min[0],
                 'disk_height': disk_max[1] - disk_min[1],
                 'disk_area': disk_area,
-                'cup_x': cup_min[0],
-                'cup_y': cup_min[1],
+                'cup_center_x': 0.5*(cup_min[0]+cup_max[0]),
+                'cup_center_y': 0.5*(cup_min[1]+cup_max[1]),
                 'cup_width': cup_max[0] - cup_min[0],
                 'cup_height': cup_max[1] - cup_min[1],
                 'cup_area': cup_area,
@@ -223,7 +226,7 @@ class AccumulateCupDiskBoundaryBox(DataFrameAccumulator):
     def finish(self, df):
         stat_df = self.dataframe()
         grouped = stat_df.groupby(['subject_id'], as_index=False)
-        tmp = pd.merge(grouped['disk_x'].agg({'n': len}),
+        tmp = pd.merge(grouped['disk_center_x'].agg({'n': len}),
                        grouped[['cdr_vertical', 'cdr_horizontal', 'cdr_area', 'nerve_cd_area']].agg(np.mean))
 
         print('CupDiskBoundaryBox statistics: ')
@@ -246,15 +249,15 @@ class AccumulateNotchHaemorrhageMarks(DataFrameAccumulator):
                 for mark in x['value']:
                     rdict = { 'mark_id': mark['tool'],
                               'mark_label': mark['tool_label'],
-                              'mark_x': mark['x'],
-                              'mark_y': mark['y'], }
+                              'mark_center_x': mark['x'],
+                              'mark_center_y': mark['y'], }
                     push_keys_and_dict_onto_list(rkey, skey, rdict, self.row_list)    
 
                 if len(x['value']) == 0:
                     rdict = { 'mark_id': -1, 
                               'mark_label': 'No_Notch_Or_Haemorrhage',
-                              'mark_x': -1,
-                              'mark_y': -1, }
+                              'mark_center_x': -1,
+                              'mark_center_y': -1, }
                     push_keys_and_dict_onto_list(rkey, skey, rdict, self.row_list)    
 
     def dataframe(self):
@@ -270,7 +273,7 @@ class AccumulateNotchHaemorrhageMarks(DataFrameAccumulator):
     def finish(self, df):        
         stat_df = super(AccumulateNotchHaemorrhageMarks, self).dataframe()
         grouped = stat_df.groupby(['subject_id', 'mark_id', 'mark_label'], as_index=False)
-        tmp = grouped['mark_x'].agg({'n': len})
+        tmp = grouped['mark_center_x'].agg({'n': len})
         print('Notch/Haemorrhage mark statistics: ')
         print(tmp)
 
@@ -343,10 +346,12 @@ def main(args):
         for a in accumulators:
             a.finish(df)
 
-        ## create single dataframe
+        ## create single dataframe and calculate mu_scale
         merged_df = df_accumulators[0].dataframe()
         for dfa in df_accumulators[1:]:
             merged_df = pd.merge(merged_df, dfa.dataframe(), how='outer')
+        merged_df['f2d_mu_scale'] = calc_f2d_mu_scale(merged_df)
+        merged_df['nerve_cd_area_mu2'] = merged_df['nerve_cd_area']*(merged_df['f2d_mu_scale']**2)
         merged_df = df_xcols(merged_df, CSV_KEY_ORDER)
         merged_df.to_csv(outdir_fn('all_data.csv'), index=False)
         
