@@ -23,7 +23,10 @@ This will produce the following file outputs for each of the tasks:
 - optic_nerve_box_data.csv
 - cup_disk_data.csv 
 - notch_haemorrhage_marks.csv
- 
+
+It will also output a all_data.csv file which contains records that
+merge the above with one row per user/subject pair.
+  
 The program works (see main function) in the following steps:
 
 - Load the Zooniverse CSV export data with Pandas
