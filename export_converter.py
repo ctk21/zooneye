@@ -32,7 +32,9 @@ def row_skey(row):
     ## NB: assumes only one subject per classification
     sub_dat = parse_field(row['subject_data'])
     sub_key = next(iter(sub_dat.keys()))
-    return {'subject_id': sub_key, 'subject_filename': sub_dat[sub_key]['filename']}
+    ## handle multiple versions
+    fnme_key = 'Filename' if 'Filename' in sub_dat[sub_key] else 'filename' 
+    return {'subject_id': sub_key, 'subject_filename': sub_dat[sub_key][fnme_key]}
 
 def parse_field(field):
     return yaml.safe_load(field) if type(field) is str else field
@@ -118,7 +120,10 @@ class AccumulateOpticNerveBox(DataFrameAccumulator):
         annotations = parse_field(row['annotations'])
         for x in annotations:
             if is_task_key(TASK_KEY_DISK_BOX, workflow_id, x):
-                dat = x['value'][0]
+                dat = x['value']
+                ## handle multiple versions
+                if type(dat) is list:
+                    dat = dat[0]
                 rdict = {'nerve_box_height': dat['height'],
                          'nerve_box_width': dat['width'],
                          'nerve_box_center_x': dat['x']+0.5*dat['width'],
@@ -297,9 +302,20 @@ class PrintRowsForTaskKey(BaseAccumulator):
             if is_task_key(self.tkey, workflow_id, x):
                 print('rkey: "%s"'%str(rkey))
                 print(yaml.dump(x))
+
                 
-                
+def ParseExpertCSV(args):
+    expert_set = set()
+    if args.expert_csv is not None:
+        if args.verbose: print('Reading expert set from: '+args.expert_csv)
+        df = pd.read_csv(args.expert_csv)
+        expert_set = set(df['user_name'].values)
+    return expert_set
+
+        
 def main(args):
+    expert_set = ParseExpertCSV(args)
+    
     for fnme in args.file:
         if args.verbose: print('Processing: '+fnme)
         
@@ -340,6 +356,7 @@ def main(args):
             skey = row_skey(row)
             if args.verbose: print(' Processing row: %s|%s'%(str(rkey), str(skey)))
             if args.dump_annotations: print(yaml.dump(parse_field(row['annotations'])))
+            if rkey['user_name'] in expert_set: rkey['expert'] = 1
             for a in accumulators:
                 a.handle_row(rkey, skey, row)
                 
@@ -359,6 +376,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Tool to read Zooniverse input and convert to objects')    
     parser.add_argument('file', nargs='+', help='files to process')
     parser.add_argument('-o', '--outpath', help='output path', default='')
+    parser.add_argument('-e', '--expert_csv', help='csv (name, user_name) listing expert users', default=None)
     parser.add_argument('-v', '--verbose', help='verbose output', default=False, action='store_true')
     parser.add_argument('--dump_annotations', help='dump every parsed annotation field', default=False, action='store_true')
     
