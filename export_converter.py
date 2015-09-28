@@ -9,7 +9,7 @@ import yaml
 
 ## valid workflow id and minimum versions supported
 VALID_WORKFLOWS = {
-    162: 14.23,        ## 'NerveMarking1'
+    162: 16.67,        ## 'NerveMarking1'
     }
 
 TASK_KEY_DISK_BOX       = (162, 'T1')
@@ -45,9 +45,14 @@ def parse_point_array(point_list):
 def is_task_key(task_key, workflow_id, annotation_row, skip_empty_value=True):
     if workflow_id != task_key[0]:
         return False
-    if ('task' in annotation_row) and ('task_label' in annotation_row):
-        return annotation_row['task'] == task_key[1] and \
-               ((not skip_empty_value) or len(annotation_row['value']) > 0)
+    if ('task' in annotation_row) and ('task_label' in annotation_row):        
+        if annotation_row['task'] == task_key[1]:
+            if not skip_empty_value:
+                return True
+            else:
+                arv = annotation_row['value']
+                return (not arv is None) and (len(annotation_row['value']) > 0)
+        return False        
     else:
         print('No task, task_label with value in annotation: %s'%str(annotation_row))
         return False
@@ -183,10 +188,10 @@ class AccumulateCupDiskBoundaryBox(DataFrameAccumulator):
         for x in annotations:
             if is_task_key(TASK_KEY_DISK_BOUNDARY, workflow_id, x):
                 dat = x['value']
-                if not 'points' in dat[0]:
+                if not 'points' in dat[-1]:
                     print('WARNING: skipping disk boundary as no points field: %s'%str(x))
                 else:
-                    dat = dat[0]
+                    dat = dat[-1]
                     assert(dat['tool'] == 0)
                     points = parse_point_array(dat['points'])
 
@@ -197,10 +202,10 @@ class AccumulateCupDiskBoundaryBox(DataFrameAccumulator):
 
             if is_task_key(TASK_KEY_CUP_BOUNDARY, workflow_id, x):
                 dat = x['value']
-                if not 'points' in dat[0]:
+                if not 'points' in dat[-1]:
                     print('WARNING: skipping cup boundary as no points field: %s'%str(x))
                 else:                    
-                    dat = dat[0]
+                    dat = dat[-1]
                     assert(dat['tool'] == 0)
                     points = parse_point_array(dat['points'])
 
