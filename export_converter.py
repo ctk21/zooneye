@@ -376,6 +376,33 @@ def main(args):
         merged_df['nerve_cd_area_mu2'] = merged_df['nerve_cd_area']*(merged_df['f2d_mu_scale']**2)
         merged_df = df_xcols(merged_df, CSV_KEY_ORDER)
         merged_df.to_csv(outdir_fn('all_data.csv'), index=False)
+
+        ## create aggregated cdr ratios by subject
+        def group_and_describe(df, group_key, trgt_nme):
+            tmp = df.groupby(group_key)
+            if len(tmp) == 0: return pd.DataFrame()
+            tmp = tmp[trgt_nme].describe().unstack()
+            tmp.columns = [trgt_nme+'_'+n for n in tmp.columns.values]
+            return tmp
+        
+        def fn(merged_df, trgt_nme):
+            sub_key = ['subject_id', 'subject_filename']
+            tmp_df = merged_df[sub_key+['expert', trgt_nme]]
+            ok = np.isfinite(tmp_df[trgt_nme].values)
+            
+            normal_df = group_and_describe(tmp_df[(tmp_df.expert==0) & ok], sub_key, trgt_nme) 
+            expert_df = group_and_describe(tmp_df[(tmp_df.expert>0) & ok], sub_key, trgt_nme)
+            if len(expert_df) == 0: return normal_df
+            return normal_df.join(expert_df, how='outer', rsuffix='_expert')
+
+        tmp = fn(merged_df, 'cdr_horizontal')
+        tmp.to_csv(outdir_fn('cdr_horizontal_aggregate.csv'))
+        tmp = fn(merged_df, 'cdr_vertical')
+        tmp.to_csv(outdir_fn('cdr_vertical_aggregate.csv'))
+
+        print('Total classifications by normal/expert:')
+        print(merged_df.groupby('expert')['expert'].count())
+        
         
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Tool to read Zooniverse input and convert to objects')    
