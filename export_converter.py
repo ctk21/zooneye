@@ -26,7 +26,8 @@ def df_xcols(df, cols):
     return df[xs[np.sort(idx)]]
 
 def row_ukey(row):
-    return {'user_name': row['user_name'], 'created_at': row['created_at'], 'expert': nan2value(row['expert'], 0)}
+    expert_val = 0 if str(row['expert']) == 'NaN' else 1
+    return {'user_name': row['user_name'], 'created_at': row['created_at'], 'expert': expert_val}
 
 def row_skey(row):
     ## NB: assumes only one subject per classification
@@ -83,7 +84,7 @@ class DataFrameAccumulator(BaseAccumulator):
         self.stat_df = None
 
     def dataframe(self):
-        if self.stat_df is None:
+        if self.stat_df is None and len(self.row_list)>0:
             self.stat_df = df_xcols(pd.DataFrame(self.row_list), CSV_KEY_ORDER)
         return self.stat_df
     
@@ -274,22 +275,28 @@ class AccumulateNotchHaemorrhageMarks(DataFrameAccumulator):
         NOTCH_ID = 0
         HAEMORRHAGE_ID = 1
         df = super(AccumulateNotchHaemorrhageMarks, self).dataframe()
-        grouped = df.groupby(CSV_KEY_ORDER, as_index=False)
-        return grouped['mark_id'].agg({
-            'n_notch': lambda xs: np.sum(xs == NOTCH_ID),
-            'n_heamorrhage': lambda xs: np.sum(xs == HAEMORRHAGE_ID),
-        }) 
+        if df is not None:
+            grouped = df.groupby(CSV_KEY_ORDER, as_index=False)
+            return grouped['mark_id'].agg({
+                'n_notch': lambda xs: np.sum(xs == NOTCH_ID),
+                'n_heamorrhage': lambda xs: np.sum(xs == HAEMORRHAGE_ID),
+            })
+        else:
+            return None
         
-    def finish(self, df):        
+    def finish(self, df):
         stat_df = super(AccumulateNotchHaemorrhageMarks, self).dataframe()
-        grouped = stat_df.groupby(['subject_id', 'mark_id', 'mark_label'], as_index=False)
-        tmp = grouped['mark_center_x'].agg({'n': len})
-        print('Notch/Haemorrhage mark statistics: ')
-        print(tmp)
+        if stat_df is not None:
+            grouped = stat_df.groupby(['subject_id', 'mark_id', 'mark_label'], as_index=False)
+            tmp = grouped['mark_center_x'].agg({'n': len})
+            print('Notch/Haemorrhage mark statistics: ')
+            print(tmp)
 
-        if self.out_file:
-            stat_df.to_csv(self.out_file, index=False)
-
+            if self.out_file:
+                stat_df.to_csv(self.out_file, index=False)
+        else:
+            print('No Notch/Haemorrhage mark records processed!')
+                
             
 class PrintSubjectInfo(BaseAccumulator):
     def handle_row(self, rkey, skey, row):
@@ -324,13 +331,19 @@ def main(args):
     for fnme in args.file:
         if args.verbose: print('Processing: '+fnme)
         
-        df = pd.read_csv(fnme)   
+        df = pd.read_csv(fnme, nrows=args.nrows)   
         if args.verbose: df.info()
 
+        if args.process_rows is not None:
+            sa = [min(int(n), len(df)-1) for n in args.process_rows.split(',')]
+            print('Taking rows %d:%d'%(sa[0], sa[1]))
+            df = df[sa[0]:sa[1]]
+        
         ## filter to valid workflows
         df = df.loc[df['workflow_id'].isin(VALID_WORKFLOWS.keys())]
         min_id = df['workflow_id'].replace(VALID_WORKFLOWS)
         df = df.loc[df['workflow_version'] >= min_id]
+        df = df.reset_index(drop=True)
 
         outdir_fn = lambda x: os.path.join(args.outpath, x)
         accum_fovea = AccumulateFoveaMarks(outdir_fn('fovea_data.csv'))
@@ -357,6 +370,7 @@ def main(args):
             a.setup(df)
 
         for idx, row in df.iterrows():
+            if args.verbose: print(row)
             rkey = row_ukey(row)
             skey = row_skey(row)
             if args.verbose: print(' Processing row: %s|%s'%(str(rkey), str(skey)))
@@ -364,6 +378,7 @@ def main(args):
             if rkey['user_name'] in expert_set: rkey['expert'] = 1
             for a in accumulators:
                 a.handle_row(rkey, skey, row)
+            if (idx+1) % 100 == 0: print('Handled %d rows'%(idx+1))
                 
         for a in accumulators:
             a.finish(df)
@@ -371,7 +386,9 @@ def main(args):
         ## create single dataframe and calculate mu_scale
         merged_df = df_accumulators[0].dataframe()
         for dfa in df_accumulators[1:]:
-            merged_df = pd.merge(merged_df, dfa.dataframe(), how='outer')
+            tmp = dfa.dataframe()
+            if tmp is not None:
+                merged_df = pd.merge(merged_df, tmp, how='outer')
         merged_df['f2d_mu_scale'] = calc_f2d_mu_scale(merged_df)
         merged_df['nerve_cd_area_mu2'] = merged_df['nerve_cd_area']*(merged_df['f2d_mu_scale']**2)
         merged_df = df_xcols(merged_df, CSV_KEY_ORDER)
@@ -393,6 +410,7 @@ def main(args):
             normal_df = group_and_describe(tmp_df[(tmp_df.expert==0) & ok], sub_key, trgt_nme) 
             expert_df = group_and_describe(tmp_df[(tmp_df.expert>0) & ok], sub_key, trgt_nme)
             if len(expert_df) == 0: return normal_df
+            if len(normal_df) == 0: return expert_df
             return normal_df.join(expert_df, how='outer', rsuffix='_expert')
 
         tmp = fn(merged_df, 'cdr_horizontal')
@@ -410,6 +428,8 @@ if __name__ == '__main__':
     parser.add_argument('-o', '--outpath', help='output path', default='')
     parser.add_argument('-e', '--expert_csv', help='csv (name, user_name) listing expert users', default=None)
     parser.add_argument('-v', '--verbose', help='verbose output', default=False, action='store_true')
+    parser.add_argument('--process_rows', help='range of rows to process (all if not present, otherwise comma seperated, e.g. 34,50', default=None)
+    parser.add_argument('--nrows', help='number of rows to read from the CSV file (all if not specified)', default=None, type=int)
     parser.add_argument('--dump_annotations', help='dump every parsed annotation field', default=False, action='store_true')
     
     args = parser.parse_args()
