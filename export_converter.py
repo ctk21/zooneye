@@ -26,7 +26,7 @@ def df_xcols(df, cols):
     return df[xs[np.sort(idx)]]
 
 def row_ukey(row):
-    expert_val = 0 if str(row['expert']) == 'NaN' else 1
+    expert_val = 1 if str(row['expert']) == 'expert' else 0
     return {'user_name': row['user_name'], 'created_at': row['created_at'], 'expert': expert_val}
 
 def row_skey(row):
